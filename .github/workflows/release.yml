@@ -1,9 +1,10 @@
-name: Release plugin
+name: Attach release files
 
+# Runs when you publish a release on GitHub. It attaches main.js, manifest.json
+# and styles.css (taken from the tagged commit) and adds provenance attestations.
 on:
-  push:
-    tags:
-      - "*"
+  release:
+    types: [published]
 
 permissions:
   contents: write
@@ -11,7 +12,7 @@ permissions:
   attestations: write
 
 jobs:
-  release:
+  assets:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,8 +20,8 @@ jobs:
       - name: Check tag matches manifest version
         run: |
           version=$(jq -r .version manifest.json)
-          if [ "$version" != "$GITHUB_REF_NAME" ]; then
-            echo "Tag $GITHUB_REF_NAME does not match manifest version $version"
+          if [ "$version" != "${{ github.event.release.tag_name }}" ]; then
+            echo "Tag ${{ github.event.release.tag_name }} does not match manifest version $version"
             exit 1
           fi
 
@@ -32,11 +33,9 @@ jobs:
             manifest.json
             styles.css
 
-      - name: Create release
+      - name: Upload files to the release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --title "$GITHUB_REF_NAME" \
-            --generate-notes \
-            main.js manifest.json styles.css
+          gh release upload "${{ github.event.release.tag_name }}" \
+            main.js manifest.json styles.css --clobber
