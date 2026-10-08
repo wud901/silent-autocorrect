@@ -1,5 +1,5 @@
-/* Obsidian Medical & Smart Spellcheck Plugin */
-const { Plugin, PluginSettingTab, Setting, Notice, Modal, Menu, MarkdownView, Platform, ItemView, setIcon } = require("obsidian");
+/* Silent Autocorrect - Obsidian plugin */
+const { Plugin, PluginSettingTab, Setting, Notice, Modal, Menu, MarkdownView, Platform, ItemView, setIcon, requestUrl, normalizePath } = require("obsidian");
 
 const DEFAULT_SETTINGS = {
   autoCorrectEnabled: true,
@@ -11,6 +11,7 @@ const DEFAULT_SETTINGS = {
   useFrequencyDictionary: true,
   fixSplitMergeErrors: true,
   freqCandidateTopN: 50000,
+  freqDownloadPrompted: false,
   correctionLog: [],
   autocorrectSensitivity: "balanced",
   shorthandsEnabled: true,
@@ -89,7 +90,7 @@ const TIER_CONFIG = {
 
 // Triggers. "full" = every rule runs. "table" = only deterministic fixes (these
 // characters are too often part of URLs, filenames, times, list numbering, etc.).
-const VIEW_TYPE_CORRECTIONS = "medical-autocorrect-corrections";
+const VIEW_TYPE_CORRECTIONS = "silent-autocorrect-corrections";
 const LOG_LIMIT = 200; // corrections kept in the side panel
 const INFO = (kind, label, confidence, canAdd = false) => ({ kind, label, confidence, canAdd });
 const FULL_TRIGGERS = new Set([" ", "Enter", ",", ";", "!", "?"]);
@@ -175,12 +176,31 @@ function classifySingleEdit(a, b) {
 }
 
 // ---------------------------------------------------------------------------
-// Frequency data (SymSpell-format files, optional). Drop these two files in the
-// plugin folder next to main.js; without them the plugin works as before.
+// Frequency data (SymSpell-format files, optional). Obsidian only installs main.js,
+// manifest.json and styles.css, so these two files are downloaded on request (see
+// downloadFrequencyData) into the plugin folder. Without them the plugin still works.
 //   unigrams: "word count"            bigrams: "word1 word2 count"
 // ---------------------------------------------------------------------------
 const FREQ_UNIGRAM_FILE = "frequency_dictionary_en_82_765.txt";
 const FREQ_BIGRAM_FILE = "frequency_bigramdictionary_en_243_342.txt";
+// Only network use in this plugin: a one-off, user-approved GET of these two public files.
+// No note content or user data is ever sent. Change this to host the files yourself.
+const FREQ_DOWNLOAD_BASE = "https://raw.githubusercontent.com/wolfgarbe/SymSpell/master/SymSpell/";
+const FREQ_FILES = [
+  { name: FREQ_UNIGRAM_FILE, minParts: 2 },
+  { name: FREQ_BIGRAM_FILE, minParts: 3 },
+];
+// Cheap sanity check so an HTML error page never gets saved as a dictionary.
+function looksLikeFrequencyFile(text, minParts) {
+  if (typeof text !== "string" || text.length < 100000) return false;
+  const lines = text.split("\n", 6).filter((l) => l.trim());
+  if (lines.length < 3) return false;
+  return lines.every((l) => {
+    const parts = l.trim().split(/\s+/);
+    const count = Number(parts[parts.length - 1]);
+    return parts.length >= minParts && Number.isFinite(count) && count > 0;
+  });
+}
 const nextTick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 class FrequencyModel {
@@ -823,8 +843,7 @@ class CorrectionLogView extends ItemView {
       const tier = pct >= 90 ? "high" : pct >= 70 ? "mid" : "low";
       const row = card.createDiv({ cls: "mac-row" });
       const conf = row.createDiv({ cls: "mac-conf", attr: { title: pct + "% confidence" } });
-      const meter = conf.createDiv({ cls: "mac-meter" });
-      meter.createDiv({ cls: "mac-meter-fill mac-" + tier }).style.width = pct + "%";
+      conf.createEl("progress", { cls: "mac-meter mac-" + tier, attr: { max: "100", value: String(pct) } });
       conf.createSpan({ cls: "mac-pct", text: pct + "%" });
       const when = [timeAgo(e.time), e.note, e.reverted ? "reverted" : ""].filter(Boolean).join(" \u00b7 ");
       const meta = row.createSpan({ cls: "mac-meta", text: when });
@@ -851,12 +870,14 @@ class CorrectionLogView extends ItemView {
   }
 }
 
-class MedicalSpellcheckPlugin extends Plugin {
+class SilentAutocorrectPlugin extends Plugin {
   async onload() {
-    console.log("Loading Medical & Smart Spellcheck Plugin");
     this.engine = new AutoCorrectEngine(() => this.settings, () => this.getSpellOracle());
     await this.loadSettings();
-    this.loadFrequencyData(); // async, optional
+    // Optional frequency data: load in the background, then (once) offer to download it if missing.
+    this.loadFrequencyData().then(() => {
+      this.app.workspace.onLayoutReady(() => this.maybePromptFrequencyDownload());
+    });
     this.registerView(VIEW_TYPE_CORRECTIONS, (leaf) => new CorrectionLogView(leaf, this));
 
     this.lastCorrection = null;
@@ -866,7 +887,7 @@ class MedicalSpellcheckPlugin extends Plugin {
 
     // 1. Build interactive Bottom Status Bar
     this.statusBarItem = this.addStatusBarItem();
-    this.statusBarItem.addClass("plugin-medical-spellcheck-bar");
+    this.statusBarItem.addClass("plugin-silent-autocorrect-bar");
     this.renderStatusBar();
 
     // Update counts when active note changes or text changes
@@ -892,7 +913,7 @@ class MedicalSpellcheckPlugin extends Plugin {
     }
 
     // 2. Add Left Ribbon Icon
-    this.addRibbonIcon("book-plus", "Add Word to Medical Dictionary", () => {
+    this.addRibbonIcon("book-plus", "Add word to dictionary", () => {
       new QuickAddWordModal(this.app, this).open();
     });
 
@@ -923,13 +944,19 @@ class MedicalSpellcheckPlugin extends Plugin {
 
     this.addCommand({
       id: "open-dictionary-manager",
-      name: "Open Dictionary & Wordlists Manager",
+      name: "Open dictionary and wordlists manager",
       callback: () => new DictionaryManagerModal(this.app, this).open(),
     });
 
     this.addCommand({
+      id: "download-frequency-dictionaries",
+      name: "Download frequency dictionaries",
+      callback: () => this.downloadFrequencyData(),
+    });
+
+    this.addCommand({
       id: "toggle-autocorrect",
-      name: "Toggle Auto-Correct ON / OFF",
+      name: "Toggle auto-correct on or off",
       callback: async () => {
         this.settings.autoCorrectEnabled = !this.settings.autoCorrectEnabled;
         await this.saveSettings();
@@ -940,7 +967,7 @@ class MedicalSpellcheckPlugin extends Plugin {
 
     this.addCommand({
       id: "cycle-sensitivity",
-      name: "Cycle Auto-Correct Sensitivity",
+      name: "Cycle auto-correct sensitivity",
       callback: async () => {
         const tiers = SENSITIVITY_TIERS;
         const curIdx = tiers.indexOf(this.settings.autocorrectSensitivity);
@@ -963,7 +990,9 @@ class MedicalSpellcheckPlugin extends Plugin {
     // 4. Register Editor Keydown Listener for Auto-Correct.
     // Capture phase on purpose: we must run BEFORE the editor's own Enter / list handling,
     // otherwise the cursor has already moved to the next line when we look for the word.
-    this.registerDomEvent(document, "keydown", (evt) => this.onKeyDown(evt), true);
+    const attachKeydown = (doc) => this.registerDomEvent(doc, "keydown", (evt) => this.onKeyDown(evt), true);
+    attachKeydown(activeDocument);
+    this.registerEvent(this.app.workspace.on("window-open", (_win, popout) => attachKeydown(popout.document)));
 
     // 5. Register Context Menu Items on Right Click
     this.registerEvent(
@@ -1013,7 +1042,8 @@ class MedicalSpellcheckPlugin extends Plugin {
     );
 
     // 6. Register Obsidian Settings Tab
-    this.addSettingTab(new MedicalSpellcheckSettingTab(this.app, this));
+    this.settingTab = new SilentAutocorrectSettingTab(this.app, this);
+    this.addSettingTab(this.settingTab);
   }
 
   updateCounts(editor) {
@@ -1395,7 +1425,7 @@ class MedicalSpellcheckPlugin extends Plugin {
       this.scheduleLogSave();
       return id;
     } catch (e) {
-      console.error("Medical Spellcheck: could not log correction", e);
+      console.error("Silent Autocorrect: could not log correction", e);
       return null;
     }
   }
@@ -1451,17 +1481,68 @@ class MedicalSpellcheckPlugin extends Plugin {
     workspace.revealLeaf(leaf);
   }
 
+  getPluginDir() {
+    return normalizePath((this.manifest && this.manifest.dir) || `${this.app.vault.configDir}/plugins/${this.manifest.id}`);
+  }
+
+  // Asks once (ever) whether to download the optional dictionaries. Nothing is fetched without a click.
+  maybePromptFrequencyDownload() {
+    const missing = this.freqStatus && this.freqStatus.state === "missing";
+    if (!missing || this.settings.freqDownloadPrompted || this.settings.useFrequencyDictionary === false) return;
+    new FrequencyDownloadModal(this.app, this).open();
+  }
+
+  // Downloads both SymSpell files with requestUrl (works on desktop and mobile, no CORS issues).
+  async downloadFrequencyData() {
+    if (this.freqDownloading) return false;
+    this.freqDownloading = true;
+    const notice = new Notice("Downloading dictionaries...", 0);
+    try {
+      const adapter = this.app.vault.adapter;
+      const dir = this.getPluginDir();
+      for (let i = 0; i < FREQ_FILES.length; i++) {
+        const file = FREQ_FILES[i];
+        notice.setMessage(`Downloading dictionary ${i + 1} of ${FREQ_FILES.length}...`);
+        const res = await requestUrl({ url: FREQ_DOWNLOAD_BASE + file.name, method: "GET" });
+        if (res.status !== 200) throw new Error(`HTTP ${res.status} for ${file.name}`);
+        if (!looksLikeFrequencyFile(res.text, file.minParts)) throw new Error(`${file.name} did not look like a dictionary file`);
+        await adapter.write(normalizePath(`${dir}/${file.name}`), res.text);
+      }
+      notice.hide();
+      new Notice("Dictionaries downloaded. Loading...");
+      await this.loadFrequencyData();
+      this.refreshSettingTab();
+      return true;
+    } catch (e) {
+      notice.hide();
+      console.error("Silent Autocorrect: dictionary download failed", e);
+      new Notice("Could not download the dictionaries. Check your connection and try again.");
+      return false;
+    } finally {
+      this.freqDownloading = false;
+    }
+  }
+
+  refreshSettingTab() {
+    try {
+      const tab = this.settingTab;
+      if (tab && tab.containerEl && tab.containerEl.isConnected) tab.display();
+    } catch (e) {
+      /* settings tab not open */
+    }
+  }
+
   // Loads the optional SymSpell frequency files from the plugin folder. Never blocks startup.
   async loadFrequencyData() {
     const status = { state: "loading", words: 0, bigrams: 0, detail: "" };
     this.freqStatus = status;
     try {
       const adapter = this.app.vault.adapter;
-      const dir = (this.manifest && this.manifest.dir) || `${this.app.vault.configDir}/plugins/${this.manifest.id}`;
+      const dir = this.getPluginDir();
       const uniPath = `${dir}/${FREQ_UNIGRAM_FILE}`;
       if (!(await adapter.exists(uniPath))) {
         status.state = "missing";
-        status.detail = `${FREQ_UNIGRAM_FILE} not found in the plugin folder`;
+        status.detail = "Dictionaries not downloaded yet";
         return;
       }
       const model = new FrequencyModel(this.settings.freqCandidateTopN || 50000);
@@ -1482,7 +1563,7 @@ class MedicalSpellcheckPlugin extends Plugin {
       }
       status.state = "loaded";
     } catch (e) {
-      console.error("Medical Spellcheck: could not load frequency data", e);
+      console.error("Silent Autocorrect: could not load frequency data", e);
       status.state = "error";
       status.detail = String((e && e.message) || e);
     }
@@ -1521,7 +1602,7 @@ class QuickAddWordModal extends Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.createEl("h2", { text: "➕ Add Word to Medical Dictionary" });
+    contentEl.createEl("h2", { text: "Add word to dictionary" });
     contentEl.createEl("p", {
       text: "Instantly add medical terms, pharmaceutical names, or custom jargon to prevent unwanted corrections.",
       cls: "setting-item-description"
@@ -1531,7 +1612,7 @@ class QuickAddWordModal extends Modal {
     let targetDict = "cardiology";
 
     new Setting(contentEl)
-      .setName("Word or Term")
+      .setName("Word or term")
       .setDesc("Enter word to be recognized across your vault.")
       .addText((text) => {
         text.setValue(word).onChange((val) => (word = val));
@@ -1586,15 +1667,15 @@ class DictionaryManagerModal extends Modal {
   renderModal() {
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.createEl("h2", { text: "📚 Dictionary & Wordlists Manager" });
+    contentEl.createEl("h2", { text: "Dictionary and wordlists manager" });
 
     // 1. Quick Add Word Section
-    contentEl.createEl("h3", { text: "➕ Add New Term" });
+    new Setting(contentEl).setName("Add new term").setHeading();
     let newWordInput = "";
     let targetSub = "cardiology";
 
     new Setting(contentEl)
-      .setName("New Word")
+      .setName("New word")
       .setDesc("Add term directly to any active sub-dictionary.")
       .addText((txt) => txt.setPlaceholder("e.g. cardioverter").onChange((v) => (newWordInput = v)))
       .addDropdown((drop) => {
@@ -1621,12 +1702,12 @@ class DictionaryManagerModal extends Modal {
       );
 
     // 2. Bulk Import Section
-    contentEl.createEl("h3", { text: "📥 Bulk Import Words" });
+    new Setting(contentEl).setName("Bulk import words").setHeading();
     let bulkWordsText = "";
     let bulkTarget = "cardiology";
 
     new Setting(contentEl)
-      .setName("Target Dictionary")
+      .setName("Target dictionary")
       .addDropdown((drop) => {
         drop.addOption("cardiology", "Cardiology");
         drop.addOption("pharmacology", "Pharmacology");
@@ -1640,11 +1721,10 @@ class DictionaryManagerModal extends Modal {
       });
 
     const bulkTextarea = contentEl.createEl("textarea", {
-      cls: "setting-item-description",
+      cls: "setting-item-description sac-bulk-textarea",
       attr: {
         placeholder: "Paste multiple words separated by commas, spaces, or newlines...",
-        rows: "3",
-        style: "width: 100%; font-family: var(--font-monospace); font-size: 11px; margin-bottom: 8px; padding: 6px;"
+        rows: "3"
       }
     });
     bulkTextarea.addEventListener("input", (e) => (bulkWordsText = e.target.value));
@@ -1682,7 +1762,7 @@ class DictionaryManagerModal extends Modal {
     );
 
     // 3. Sub-Dictionaries List
-    contentEl.createEl("h3", { text: "🩺 Medical Sub-Dictionaries" });
+    new Setting(contentEl).setName("Medical sub-dictionaries").setHeading();
 
     for (const [id, sub] of Object.entries(this.plugin.settings.subDictionaries || {})) {
       const customCount = (this.plugin.settings.customSubWords?.[id] || []).length;
@@ -1708,8 +1788,8 @@ class DictionaryManagerModal extends Modal {
     }
 
     // 4. Custom Added Words List
-    contentEl.createEl("h3", { text: "🏷️ Custom Added Words" });
-    const wordsDiv = contentEl.createDiv({ cls: "custom-words-container", attr: { style: "display: flex; flex-wrap: wrap; gap: 4px; max-height: 160px; overflow-y: auto; padding: 6px; border: 1px solid var(--background-modifier-border); border-radius: 6px;" } });
+    new Setting(contentEl).setName("Custom added words").setHeading();
+    const wordsDiv = contentEl.createDiv({ cls: "custom-words-container" });
 
     const allCustomItems = [];
     (this.plugin.settings.customWords || []).forEach((w) => allCustomItems.push({ word: w, dict: "custom" }));
@@ -1747,8 +1827,51 @@ class DictionaryManagerModal extends Modal {
   }
 }
 
+// Modal 3: one-time opt-in prompt for the optional dictionary download
+class FrequencyDownloadModal extends Modal {
+  constructor(app, plugin) {
+    super(app);
+    this.plugin = plugin;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createEl("h2", { text: "Download frequency dictionaries?" });
+    contentEl.createEl("p", {
+      text: "Silent Autocorrect can use two English word-frequency files (about 6.5 MB) to tell real words from typos and to fix spacing slips such as \"inthe\". They are downloaded once from GitHub (raw.githubusercontent.com) and saved in this plugin's folder. Nothing you write is sent anywhere. You can also do this later from the plugin settings.",
+    });
+    new Setting(contentEl)
+      .addButton((btn) =>
+        btn
+          .setButtonText("Download")
+          .setCta()
+          .onClick(async () => {
+            await this.finish();
+            this.close();
+            await this.plugin.downloadFrequencyData();
+          })
+      )
+      .addButton((btn) =>
+        btn.setButtonText("Not now").onClick(async () => {
+          await this.finish();
+          this.close();
+        })
+      );
+  }
+
+  async finish() {
+    this.plugin.settings.freqDownloadPrompted = true;
+    await this.plugin.saveData(this.plugin.settings);
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
 // Settings Tab
-class MedicalSpellcheckSettingTab extends PluginSettingTab {
+class SilentAutocorrectSettingTab extends PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
@@ -1757,16 +1880,14 @@ class MedicalSpellcheckSettingTab extends PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: "Medical & Smart Spellcheck Settings" });
-
-    // Section 1: Add New Word to Dictionary
-    containerEl.createEl("h3", { text: "➕ Add Word to Dictionary" });
+    // Section 1: Add new word to dictionary
+    new Setting(containerEl).setName("Add word to dictionary").setHeading();
 
     let inputWord = "";
     let selectedSubDict = "cardiology";
 
     new Setting(containerEl)
-      .setName("Add New Term")
+      .setName("Add new term")
       .setDesc("Word will be recognized across all notes and protected from auto-correct.")
       .addText((text) => text.setPlaceholder("e.g. neurogenesis").onChange((v) => (inputWord = v)))
       .addDropdown((drop) => {
@@ -1793,10 +1914,10 @@ class MedicalSpellcheckSettingTab extends PluginSettingTab {
       );
 
     // Section 2: General & Sensitivity Controls
-    containerEl.createEl("h3", { text: "General Options" });
+    new Setting(containerEl).setName("General").setHeading();
 
     new Setting(containerEl)
-      .setName("Enable Real-time Auto-Correct")
+      .setName("Enable real-time auto-correct")
       .setDesc("Automatically corrects typos as you type upon hitting Space or punctuation.")
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.autoCorrectEnabled).onChange(async (val) => {
@@ -1806,7 +1927,7 @@ class MedicalSpellcheckSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Undo on Backspace")
+      .setName("Undo on backspace")
       .setDesc("Pressing Backspace right after an auto-correction restores your original word.")
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.undoOnBackspace).onChange(async (val) => {
@@ -1816,7 +1937,7 @@ class MedicalSpellcheckSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Auto-Correct Sensitivity")
+      .setName("Auto-correct sensitivity")
       .setDesc("Ultra (35%), Proactive (45%), Balanced (52%, Word-like default), Strict (68%), or Minimal (tables and shorthands only). Spell-checker corrections need Obsidian's Settings > Editor > Spellcheck turned on.")
       .addDropdown((drop) =>
         drop
@@ -1834,7 +1955,7 @@ class MedicalSpellcheckSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Use frequency dictionary")
-      .setDesc("Uses the word-frequency files in the plugin folder to tell real words from typos and pick the most likely fix.")
+      .setDesc("Uses the downloaded word-frequency files to tell real words from typos and pick the most likely fix.")
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.useFrequencyDictionary !== false).onChange(async (val) => {
           this.plugin.settings.useFrequencyDictionary = val;
@@ -1844,7 +1965,7 @@ class MedicalSpellcheckSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Fix split and merged words")
-      .setDesc('Fixes spacing slips such as "ism y name" -> "is my name", "inthe" -> "in the" and "wh at" -> "what". Needs the bigram file.')
+      .setDesc('Fixes spacing slips such as "ism y name" -> "is my name", "inthe" -> "in the" and "wh at" -> "what". Needs the downloaded dictionaries.')
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.fixSplitMergeErrors !== false).onChange(async (val) => {
           this.plugin.settings.fixSplitMergeErrors = val;
@@ -1859,13 +1980,24 @@ class MedicalSpellcheckSettingTab extends PluginSettingTab {
         : fs.state === "loading"
         ? "Loading..."
         : fs.detail;
-    new Setting(containerEl).setName("Frequency data status").setDesc(fsText);
+    new Setting(containerEl)
+      .setName("Frequency dictionaries")
+      .setDesc((fsText.endsWith(".") ? fsText : fsText + ".") + " Downloaded once from GitHub (about 6.5 MB) and stored in the plugin folder.")
+      .addButton((btn) =>
+        btn
+          .setButtonText(fs.state === "loaded" ? "Download again" : "Download")
+          .setDisabled(!!this.plugin.freqDownloading)
+          .onClick(async () => {
+            await this.plugin.downloadFrequencyData();
+            this.display();
+          })
+      );
 
     // Section 3: Clinical Shorthands
-    containerEl.createEl("h3", { text: "Clinical Shorthands (Toggleable)" });
+    new Setting(containerEl).setName("Clinical shorthands").setHeading();
 
     new Setting(containerEl)
-      .setName("Enable Clinical Shorthands")
+      .setName("Enable clinical shorthands")
       .setDesc("Expands clinical acronyms (e.g. pt -> patient, hx -> history, dx -> diagnosis).")
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.shorthandsEnabled).onChange(async (val) => {
@@ -1888,8 +2020,8 @@ class MedicalSpellcheckSettingTab extends PluginSettingTab {
           )
           .addDropdown((drop) =>
             drop
-              .addOption("silent", "Silent Auto-Correct")
-              .addOption("underline", "Underline Only")
+              .addOption("silent", "Silent auto-correct")
+              .addOption("underline", "Underline only")
               .setValue(sh.mode)
               .onChange(async (val) => {
                 this.plugin.settings.clinicalShorthands[key].mode = val;
@@ -1899,8 +2031,8 @@ class MedicalSpellcheckSettingTab extends PluginSettingTab {
       }
     }
 
-    // Section 4: Medical Sub-Dictionaries
-    containerEl.createEl("h3", { text: "Medical Sub-Dictionaries" });
+    // Section 4: Medical sub-dictionaries
+    new Setting(containerEl).setName("Medical sub-dictionaries").setHeading();
 
     for (const [id, sub] of Object.entries(this.plugin.settings.subDictionaries)) {
       new Setting(containerEl)
@@ -1914,8 +2046,8 @@ class MedicalSpellcheckSettingTab extends PluginSettingTab {
         )
         .addDropdown((drop) =>
           drop
-            .addOption("silent", "Silent Auto-Correct")
-            .addOption("underline", "Underline Only")
+            .addOption("silent", "Silent auto-correct")
+            .addOption("underline", "Underline only")
             .setValue(sub.mode)
             .onChange(async (val) => {
               this.plugin.settings.subDictionaries[id].mode = val;
@@ -1926,5 +2058,5 @@ class MedicalSpellcheckSettingTab extends PluginSettingTab {
   }
 }
 
-module.exports = MedicalSpellcheckPlugin;
+module.exports = SilentAutocorrectPlugin;
 module.exports.AutoCorrectEngine = AutoCorrectEngine;
