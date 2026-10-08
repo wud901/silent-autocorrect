@@ -4,7 +4,7 @@
   "version": "1.4.0",
   "minAppVersion": "0.15.0",
   "description": "Word-style real-time auto-correct spellchecker with interactive bottom status bar, dictionary manager to add words anytime, toggleable clinical shorthands, and medical sub-dictionaries.",
-  "author": "Obsidian Health & Editorial",
-  "authorUrl": "https://obsidian.md",
+  "author": "Wud",
+  "authorUrl": "https://github.com/wud901",
   "isDesktopOnly": false
 }
