@@ -1,4 +1,4 @@
-# Silent Autocorrect for Obsidian
+# Silent Autocorrect
 
 Word-style, real-time auto-correct for Obsidian, with an interactive status bar, a dictionary manager, toggleable clinical shorthands and medical sub-dictionaries. Fixes happen silently as you type, and one press of Backspace undoes any of them.
 
