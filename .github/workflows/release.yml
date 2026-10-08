@@ -1,10 +1,15 @@
-name: Attach release files
+name: Release
 
-# Runs when you publish a release on GitHub. It attaches main.js, manifest.json
-# and styles.css (taken from the tagged commit) and adds provenance attestations.
+# Manual workflow: run it from the Actions tab and type the new version.
+# It bumps manifest.json and versions.json, commits, tags, and publishes a
+# release with main.js, manifest.json and styles.css attached (plus attestations).
 on:
-  release:
-    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "New version, for example 1.0.1 (no v)"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -12,18 +17,46 @@ permissions:
   attestations: write
 
 jobs:
-  assets:
+  release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Check tag matches manifest version
+      - name: Validate version
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
-          version=$(jq -r .version manifest.json)
-          if [ "$version" != "${{ github.event.release.tag_name }}" ]; then
-            echo "Tag ${{ github.event.release.tag_name }} does not match manifest version $version"
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Version must look like 1.0.1 (digits only, no v)."
             exit 1
           fi
+          if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
+            echo "Tag $VERSION already exists. Pick a new version."
+            exit 1
+          fi
+
+      - name: Bump manifest.json and versions.json
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          min=$(jq -r .minAppVersion manifest.json)
+          jq --arg v "$VERSION" '.version = $v' manifest.json > manifest.tmp && mv manifest.tmp manifest.json
+          [ -f versions.json ] || echo '{}' > versions.json
+          jq --arg v "$VERSION" --arg m "$min" '. + {($v): $m}' versions.json > versions.tmp && mv versions.tmp versions.json
+
+      - name: Commit version bump
+        id: commit
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add manifest.json versions.json
+          git commit -m "Release $VERSION"
+          git push
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Attest release files
         uses: actions/attest-build-provenance@v2
@@ -33,9 +66,14 @@ jobs:
             manifest.json
             styles.css
 
-      - name: Upload files to the release
+      - name: Create release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+          SHA: ${{ steps.commit.outputs.sha }}
         run: |
-          gh release upload "${{ github.event.release.tag_name }}" \
-            main.js manifest.json styles.css --clobber
+          gh release create "$VERSION" \
+            --target "$SHA" \
+            --title "$VERSION" \
+            --generate-notes \
+            main.js manifest.json styles.css
