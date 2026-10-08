@@ -1,58 +1,68 @@
-# Medical & Smart Spellcheck (Auto-Correct) for Obsidian
+# Silent Autocorrect for Obsidian
 
-A clinical and everyday writing plugin for Obsidian featuring **interactive UI, complete bottom status bar integration, and dictionary word management**.
+Word-style, real-time auto-correct for Obsidian, with an interactive status bar, a dictionary manager, toggleable clinical shorthands and medical sub-dictionaries. Fixes happen silently as you type, and one press of Backspace undoes any of them.
 
-## Key Features
+> **Desktop only.** Silent Autocorrect uses the status bar and Obsidian's built-in spellchecker, so it is marked desktop-only.
 
-- **Interactive Bottom Status Bar**:
-  - Live metrics: `X words · X chars · ~X min read` (updates in real-time as you write).
-  - `[+ Add Word]` button directly in the Obsidian bottom bar for 1-click word addition.
-  - `[🟢 Auto-Correct: ON]` toggleable status pill with pulsing indicator.
-  - `[⚡ BALANCED]` sensitivity pill (click to cycle Proactive → Balanced → Strict → Minimal).
-  - `[📚 6 Sub-Dicts]` sub-dictionaries count pill (click to open Dictionary Manager).
-  - `[↺ X fixed]` session counter (click to revert last correction).
-  - `[✨ Clean]` status indicator.
-  - Clicking/Right-clicking status bar opens quick menu for fast settings access.
+## Features
 
-- **Add Words to Dictionaries Anytime**:
-  - **Status bar button**: Click `[+ Add Word]` on the bottom bar.
-  - **Left Ribbon**: Click the book icon on the left ribbon.
-  - **Editor Right-Click Menu**: Right-click any word → `Add to Medical Dictionary` → choose Cardiology, Pharmacology, Surgery, Neurology, Pathology, Anatomy, or Custom Words.
-  - **Command Palette**: Run `Medical Spellcheck: Add word under cursor to dictionary`.
-  - **Dictionary Manager Modal**: Add words individually, paste bulk lists, or browse/delete added words.
-  - **Settings Tab**: Form to add words and manage custom wordlists.
+- **Status bar**
+  - Live word and character counts with an estimated reading time.
+  - `Add Word` button for one-click dictionary additions.
+  - Auto-correct on/off pill.
+  - Sensitivity pill: click to cycle Ultra, Proactive, Balanced, Strict and Minimal.
+  - Sub-dictionary count: click to open the dictionary manager.
+  - Session counter: click to revert the last correction.
+  - Right-click the status bar for a quick menu.
+- **Add words anytime**
+  - Status bar button, left ribbon icon, or right-click a word in the editor.
+  - Command palette: *Add word under cursor to dictionary*.
+  - Dictionary manager: add single words, bulk-paste lists, and browse or remove custom words.
+  - Plugin settings.
+- **Clinical shorthands** (each individually toggleable): `pt` to `patient`, `hx` to `history`, `dx` to `diagnosis`, `tx` to `treatment`, `rx` to `prescription`, `sob` to `shortness of breath`, `prn` to `as needed` and more. Choose silent auto-correct or underline-only per shorthand.
+- **Medical sub-dictionaries**: Cardiology and Pulmonology, Pharmacology, Surgery, Neurology, Pathology and Anatomy, each toggleable.
+- **Sensitivity tiers**: Ultra (35%), Proactive (45%), Balanced (52%, the default), Strict (68%) and Minimal (verified fixes only).
+- **Instant Backspace undo**: press Backspace right after a correction to restore what you typed.
+- **Auto-corrections panel**: lists every silent fix, newest first, with its type (English, Medical, Shorthand, Case, Spacing), a confidence meter, the note it happened in, and a **Dict** button to add the original word to your dictionary. The last 200 fixes are kept; the bin icon clears them. Open it from the ribbon, the command palette (*Show auto-corrections panel*) or the status bar menu.
 
-- **Toggleable Clinical Shorthands**:
-  - Individually enable abbreviations like `pt` → `patient`, `hx` → `history`, `dx` → `diagnosis`, `tx` → `treatment`, `rx` → `prescription`, `sob` → `shortness of breath`, `prn` → `as needed`.
-  - Choose between **Silent Auto-Correct** (expands on space) or **Underline Mode** (manual review).
+## Optional frequency dictionaries (network use)
 
-- **Medical Sub-Dictionaries**:
-  - Toggle specific specialties: *Cardiology*, *Pharmacology*, *Surgery*, *Neurology*, *Pathology*, *Anatomy*.
+Two English word-frequency files let the plugin tell real words from typos, pick the most likely fix (`hte` to `the`) and repair spacing (`ism y name` to `is my name`, `inthe` to `in the`, `wh at` to `what`).
 
-- **Sensitivity Controls**:
-  - 5 tiers: Ultra (35% - fastest), Proactive (45%), Balanced (52% - Word default), Strict (68%), Minimal (Verified Only).
+Obsidian only installs `main.js`, `manifest.json` and `styles.css`, so these files are **downloaded on request**:
 
-- **Instant Backspace Undo**:
-  - If you dislike an auto-correction, pressing Backspace immediately after restores what you typed.
+- The first time the plugin loads without them, it asks once whether to download them. Nothing is fetched unless you click **Download**.
+- You can download (or re-download) them any time from **Settings, Silent Autocorrect, Frequency dictionaries**, or with the command *Download frequency dictionaries*.
+- Source: `https://raw.githubusercontent.com/wolfgarbe/SymSpell/master/SymSpell/` (about 6.5 MB in total). The files are saved in the plugin's own folder.
+- This is the plugin's only network access. No note content, vault data or analytics are ever sent.
 
-## Frequency Dictionary & Split/Merge Fixes (optional)
+Without these files the plugin still works using its built-in dictionaries.
 
-Put these two files in the plugin folder next to `main.js` (SymSpell English data):
+## Privacy and data
 
-- `frequency_dictionary_en_82_765.txt` - lets the plugin tell real words from typos and pick the most likely fix (`hte` -> `the`), even without Obsidian's spellcheck.
-- `frequency_bigramdictionary_en_243_342.txt` - enables spacing fixes: `ism y name` -> `is my name`, `inthe` -> `in the`, `wh at` -> `what`.
+- Everything runs locally. The plugin makes no network requests other than the optional download above.
+- The auto-corrections panel history (original word, corrected word, confidence and the **title of the note** it happened in) is stored locally in the plugin's `data.json` inside your vault, together with your settings and custom words. Use the bin icon in the panel to clear the history.
+- On desktop the plugin asks Obsidian's built-in Chromium spellchecker whether a word is misspelled (via Electron's `webFrame`). This stays on your machine and only works when *Settings, Editor, Spellcheck* is enabled.
+- No ads, no telemetry, no account required.
 
-Both load in the background at startup; without them the plugin behaves as before. Toggle them under Settings -> Use frequency dictionary / Fix split and merged words (the settings page also shows what loaded).
+## Medical disclaimer
 
-## Auto-corrections Panel
-
-Open it from the left ribbon (spell-check icon), the command palette (*Show auto-corrections panel*) or the status-bar right-click menu. It lists every silent fix, newest first, with its type (English, Medical, Shorthand, Case, Spacing), a confidence meter, the note it happened in, and a small **Dict** button that adds the word you originally typed to your dictionary so it's never corrected again. The last 200 fixes are kept; the bin icon clears them.
+Silent Autocorrect is a writing aid, not a clinical tool. Auto-expanded shorthands and corrected drug or condition names can be wrong. Always proofread anything used in clinical, legal or other safety-critical settings.
 
 ## Installation
 
-1. In Obsidian, open **Settings** → **Community Plugins**.
-2. Turn OFF **Restricted mode**.
-3. Click the folder icon next to "Installed plugins" to open `.obsidian/plugins/`.
-4. Create a folder named `obsidian-medical-autocorrect`.
-5. Place `manifest.json`, `main.js`, and `styles.css` in that folder (plus the two optional frequency files above).
-6. Click **Reload plugins** in Obsidian and toggle **Medical & Smart Spellcheck** ON!
+### From Community Plugins (once approved)
+
+1. In Obsidian, open **Settings, Community plugins**.
+2. Turn off Restricted mode, choose **Browse**, search for **Silent Autocorrect**, then **Install** and **Enable**.
+
+### Manual
+
+1. Download `main.js`, `manifest.json` and `styles.css` from the latest GitHub release.
+2. Create the folder `<your vault>/.obsidian/plugins/silent-autocorrect/` and copy the three files into it. The folder name must be `silent-autocorrect`.
+3. Reload Obsidian and enable **Silent Autocorrect** under **Settings, Community plugins**.
+
+## Credits and licenses
+
+- Word-frequency data (`frequency_dictionary_en_82_765.txt`, `frequency_bigramdictionary_en_243_342.txt`) comes from [SymSpell](https://github.com/wolfgarbe/SymSpell) by Wolf Garbe (MIT License). Please see that repository for the data's own sources and licensing terms. The files are downloaded from there and are not redistributed in this repository.
+- This plugin is released under the license in the `LICENSE` file.
