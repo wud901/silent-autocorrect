@@ -1,42 +1,12 @@
-/* Obsidian Medical & Smart Spellcheck Styles */
-.cm-autocorrect-indicator {
-  border-bottom: 2px dotted #3b82f6;
-  position: relative;
-  cursor: pointer;
-}
+/* Silent Autocorrect styles */
 
-.cm-autocorrect-indicator:hover {
-  background-color: rgba(59, 130, 246, 0.12);
-  border-radius: 2px;
-}
 
-.cm-spelling-underline {
-  text-decoration: underline wavy #ef4444;
-  text-decoration-thickness: 1.5px;
-  text-underline-offset: 3px;
-  cursor: pointer;
-}
 
-.cm-shorthand-underline {
-  text-decoration: underline dotted #10b981;
-  text-decoration-thickness: 1.5px;
-  text-underline-offset: 3px;
-  cursor: pointer;
-}
 
-.cm-grammar-highlight {
-  text-decoration: underline wavy #38bdf8;
-  text-decoration-thickness: 1.5px;
-  text-underline-offset: 3px;
-  cursor: help;
-}
 
-.cm-grammar-highlight:hover {
-  background-color: rgba(56, 189, 248, 0.15);
-}
 
 /* Obsidian Bottom Status Bar Integration */
-.status-bar-item.plugin-medical-spellcheck-bar {
+.status-bar-item.plugin-silent-autocorrect-bar {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -45,7 +15,7 @@
   font-family: var(--font-ui);
 }
 
-.plugin-medical-spellcheck-bar .status-bar-pill {
+.plugin-silent-autocorrect-bar .status-bar-pill {
   display: inline-flex;
   align-items: center;
   gap: 3px;
@@ -60,57 +30,57 @@
   font-size: 11px;
 }
 
-.plugin-medical-spellcheck-bar .status-bar-pill:hover {
+.plugin-silent-autocorrect-bar .status-bar-pill:hover {
   background: var(--background-modifier-hover);
   color: var(--text-normal);
   border-color: var(--interactive-accent);
 }
 
-.plugin-medical-spellcheck-bar .status-bar-add-btn {
+.plugin-silent-autocorrect-bar .status-bar-add-btn {
   background: rgba(16, 185, 129, 0.15);
   border-color: rgba(16, 185, 129, 0.35);
   color: #10b981;
   font-weight: 500;
 }
 
-.plugin-medical-spellcheck-bar .status-bar-add-btn:hover {
+.plugin-silent-autocorrect-bar .status-bar-add-btn:hover {
   background: rgba(16, 185, 129, 0.25);
   color: #34d399;
 }
 
-.plugin-medical-spellcheck-bar .status-dot {
+.plugin-silent-autocorrect-bar .status-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
   display: inline-block;
 }
 
-.plugin-medical-spellcheck-bar .status-dot.active {
+.plugin-silent-autocorrect-bar .status-dot.active {
   background-color: #10b981;
   box-shadow: 0 0 4px #10b981;
 }
 
-.plugin-medical-spellcheck-bar .status-dot.inactive {
+.plugin-silent-autocorrect-bar .status-dot.inactive {
   background-color: #ef4444;
 }
 
-.plugin-medical-spellcheck-bar .status-bar-metrics {
+.plugin-silent-autocorrect-bar .status-bar-metrics {
   color: var(--text-faint);
   font-size: 10px;
   padding: 0 2px;
 }
 
-.plugin-medical-spellcheck-bar .status-bar-pill.pill-sens {
+.plugin-silent-autocorrect-bar .status-bar-pill.pill-sens {
   color: #c084fc;
   font-family: var(--font-monospace);
   font-size: 10px;
 }
 
-.plugin-medical-spellcheck-bar .status-bar-pill.pill-dict {
+.plugin-silent-autocorrect-bar .status-bar-pill.pill-dict {
   color: #a855f7;
 }
 
-.plugin-medical-spellcheck-bar .status-bar-pill.pill-fixed {
+.plugin-silent-autocorrect-bar .status-bar-pill.pill-fixed {
   color: #60a5fa;
   font-family: var(--font-monospace);
 }
@@ -269,16 +239,21 @@
 
 .mac-conf { flex: none; display: flex; align-items: center; gap: 5px; }
 .mac-meter {
+  -webkit-appearance: none;
+  appearance: none;
   width: 38px;
   height: 3px;
+  border: none;
   border-radius: 999px;
   background: var(--background-modifier-border);
   overflow: hidden;
+  vertical-align: middle;
 }
-.mac-meter-fill { height: 100%; border-radius: 999px; transition: width 0.4s ease; }
-.mac-meter-fill.mac-high { background: var(--mac-green); }
-.mac-meter-fill.mac-mid { background: var(--mac-amber); }
-.mac-meter-fill.mac-low { background: var(--mac-orange); }
+.mac-meter::-webkit-progress-bar { background: transparent; }
+.mac-meter::-webkit-progress-value { border-radius: 999px; transition: width 0.4s ease; }
+.mac-meter.mac-high::-webkit-progress-value { background: var(--mac-green); }
+.mac-meter.mac-mid::-webkit-progress-value { background: var(--mac-amber); }
+.mac-meter.mac-low::-webkit-progress-value { background: var(--mac-orange); }
 
 .mac-pct {
   min-width: 27px;
@@ -339,3 +314,23 @@
 .mac-empty-icon svg { width: 16px; height: 16px; }
 .mac-empty-title { font-size: 12px; font-weight: 600; color: var(--text-muted); }
 .mac-empty-text { font-size: 10.5px; color: var(--text-faint); max-width: 200px; line-height: 1.4; }
+
+/* Dictionary manager modal (replaces former inline styles) */
+.custom-words-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-height: 160px;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+}
+
+.sac-bulk-textarea {
+  width: 100%;
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  margin-bottom: 8px;
+  padding: 6px;
+}
