@@ -185,7 +185,7 @@
 }
 .mac-card:hover { border-color: var(--background-modifier-border-hover, var(--interactive-accent)); }
 .mac-card.is-reverted { opacity: 0.55; }
-.mac-card.is-reverted .mac-fixed { text-decoration: line-through; text-decoration-color: var(--text-faint); }
+.mac-card.is-reverted .mac-fixed { text-decoration: line-through; }
 
 .mac-fresh { animation: mac-pop 0.3s ease-out; }
 @keyframes mac-pop {
@@ -209,7 +209,6 @@
 .mac-orig {
   color: var(--mac-red);
   text-decoration: line-through;
-  text-decoration-thickness: 1.5px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
