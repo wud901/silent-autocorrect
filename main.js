@@ -900,6 +900,7 @@ class SilentAutocorrectPlugin extends Plugin {
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", () => {
         const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+        if (view && view.containerEl) this.attachKeydown(view.containerEl.ownerDocument);
         if (view && view.editor) {
           this.updateCounts(view.editor);
         }
@@ -990,9 +991,16 @@ class SilentAutocorrectPlugin extends Plugin {
     // 4. Register Editor Keydown Listener for Auto-Correct.
     // Capture phase on purpose: we must run BEFORE the editor's own Enter / list handling,
     // otherwise the cursor has already moved to the next line when we look for the word.
-    const attachKeydown = (doc) => this.registerDomEvent(doc, "keydown", (evt) => this.onKeyDown(evt), true);
-    attachKeydown(activeDocument);
-    this.registerEvent(this.app.workspace.on("window-open", (_win, popout) => attachKeydown(popout.document)));
+    // Registered once per document, and re-checked at several points (layout ready, every
+    // leaf change, new popout windows) so a missed registration at startup heals itself.
+    this.keydownDocs = new WeakSet();
+    this.attachKeydown(this.app.workspace.containerEl && this.app.workspace.containerEl.ownerDocument);
+    this.attachKeydown(activeDocument);
+    this.app.workspace.onLayoutReady(() => {
+      this.attachKeydown(this.app.workspace.containerEl && this.app.workspace.containerEl.ownerDocument);
+      this.attachKeydown(activeDocument);
+    });
+    this.registerEvent(this.app.workspace.on("window-open", (_win, popout) => this.attachKeydown(popout.document)));
 
     // 5. Register Context Menu Items on Right Click
     this.registerEvent(
@@ -1275,6 +1283,12 @@ class SilentAutocorrectPlugin extends Plugin {
 
   isRealWord(word) {
     return this.engine.isKnown(String(word).toLowerCase());
+  }
+
+  attachKeydown(doc) {
+    if (!doc || !this.keydownDocs || this.keydownDocs.has(doc)) return;
+    this.keydownDocs.add(doc);
+    this.registerDomEvent(doc, "keydown", (evt) => this.onKeyDown(evt), true);
   }
 
   onKeyDown(evt) {
