@@ -333,3 +333,10 @@
   margin-bottom: 8px;
   padding: 6px;
 }
+
+.sac-diag-textarea {
+  width: 100%;
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  padding: 6px;
+}
