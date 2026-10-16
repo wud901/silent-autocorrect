@@ -3,7 +3,7 @@ const { Plugin, PluginSettingTab, Setting, Notice, Modal, Menu, MarkdownView, Pl
 
 // Status bar indicators the user can show or hide individually.
 const STATUS_BAR_ITEMS = [
-  { key: "metrics", name: "Word and character count", desc: "Live word count, character count and estimated reading time." },
+  { key: "metrics", name: "Word and character count", desc: "Live word count, character count and estimated reading time. While shown, it replaces Obsidian's built-in count." },
   { key: "addWord", name: "Add word button", desc: "One-click button to add a word to your dictionaries." },
   { key: "autoCorrect", name: "Auto-correct on/off", desc: "Shows whether auto-correct is on. Click it to switch it on or off." },
   { key: "sensitivity", name: "Sensitivity", desc: "Shows the current sensitivity tier. Click it to cycle through the tiers." },
@@ -1229,8 +1229,9 @@ class SilentAutocorrectPlugin extends Plugin {
     if (this.statusItemVisible("metrics")) {
       const metricsEl = this.statusBarItem.createSpan({ cls: "status-bar-metrics" });
       const estRead = Math.max(1, Math.ceil(this.currentWordCount / 200));
-      metricsEl.setText(`${this.currentWordCount}w · ${this.currentCharCount}c (~ ${estRead}m)`);
-      metricsEl.title = "Document word & character counts";
+      const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+      metricsEl.setText(`${plural(this.currentWordCount, "word", "words")} · ${plural(this.currentCharCount, "character", "characters")} · ~${plural(estRead, "min", "mins")}`);
+      metricsEl.title = "Word count, character count and estimated reading time";
     }
 
     // 2. Add Word Button Pill
@@ -1303,6 +1304,9 @@ class SilentAutocorrectPlugin extends Plugin {
       });
     }
 
+    // Our count replaces Obsidian's built-in one while it is shown.
+    this.setNativeCountHidden(this.statusItemVisible("metrics"));
+
     // Hide the whole item (and its padding) when every indicator is switched off.
     const anyVisible = STATUS_BAR_ITEMS.some((i) => i.key !== "fixed" ? this.statusItemVisible(i.key) : this.statusItemVisible("fixed") && fixCount > 0);
     this.statusBarItem.toggleClass("sac-hidden", !anyVisible);
@@ -1312,6 +1316,17 @@ class SilentAutocorrectPlugin extends Plugin {
       evt.preventDefault();
       this.showQuickMenu(evt);
     });
+  }
+
+  // Obsidian's core "Word count" plugin owns .plugin-word-count; we hide it with a body class
+  // (see styles.css) instead of touching its element, and restore it when we stop showing ours.
+  setNativeCountHidden(hide) {
+    try {
+      const doc = (this.app.workspace.containerEl && this.app.workspace.containerEl.ownerDocument) || activeDocument;
+      if (doc && doc.body) doc.body.classList.toggle("sac-hide-native-count", !!hide);
+    } catch (e) {
+      this.logError("hiding the built-in word count", e);
+    }
   }
 
   statusItemVisible(key) {
@@ -1638,6 +1653,7 @@ class SilentAutocorrectPlugin extends Plugin {
   }
 
   onunload() {
+    this.setNativeCountHidden(false);
     if (this.logSaveTimer) {
       clearTimeout(this.logSaveTimer);
       this.logSaveTimer = null;
