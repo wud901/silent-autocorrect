@@ -340,3 +340,7 @@
   font-size: 11px;
   padding: 6px;
 }
+
+.status-bar-item.sac-hidden {
+  display: none;
+}
