@@ -1,6 +1,18 @@
 /* Silent Autocorrect - Obsidian plugin */
 const { Plugin, PluginSettingTab, Setting, Notice, Modal, Menu, MarkdownView, Platform, ItemView, setIcon, requestUrl, normalizePath, apiVersion } = require("obsidian");
 
+// Status bar indicators the user can show or hide individually.
+const STATUS_BAR_ITEMS = [
+  { key: "metrics", name: "Word and character count", desc: "Live word count, character count and estimated reading time." },
+  { key: "addWord", name: "Add word button", desc: "One-click button to add a word to your dictionaries." },
+  { key: "autoCorrect", name: "Auto-correct on/off", desc: "Shows whether auto-correct is on. Click it to switch it on or off." },
+  { key: "sensitivity", name: "Sensitivity", desc: "Shows the current sensitivity tier. Click it to cycle through the tiers." },
+  { key: "dictionaries", name: "Sub-dictionaries", desc: "Shows how many sub-dictionaries are on. Click it to open the dictionary manager." },
+  { key: "fixed", name: "Fixed counter", desc: "Appears after the first correction of a session. Click it to undo the last correction." },
+];
+const STATUS_BAR_DEFAULTS = Object.fromEntries(STATUS_BAR_ITEMS.map((i) => [i.key, true]));
+const ISSUES_URL = "https://github.com/wud901/silent-autocorrect/issues";
+
 const DEFAULT_SETTINGS = {
   autoCorrectEnabled: true,
   undoOnBackspace: true,
@@ -12,6 +24,7 @@ const DEFAULT_SETTINGS = {
   fixSplitMergeErrors: true,
   freqCandidateTopN: 50000,
   freqDownloadPrompted: false,
+  statusBarItems: Object.assign({}, STATUS_BAR_DEFAULTS),
   correctionLog: [],
   autocorrectSensitivity: "balanced",
   shorthandsEnabled: true,
@@ -76,6 +89,7 @@ function getDamerauDistance(a, b) {
 // ---------------------------------------------------------------------------
 
 const SENSITIVITY_TIERS = ["ultra", "proactive", "balanced", "strict", "minimal"];
+
 
 // threshold = minimum confidence (0-1). minMargin = lead the best candidate must have
 // over the runner-up. minLen = shortest word the spell-checker path may touch.
@@ -1212,59 +1226,69 @@ class SilentAutocorrectPlugin extends Plugin {
     const fixCount = this.sessionCorrectionCount || 0;
 
     // 1. Metrics Pill
-    const metricsEl = this.statusBarItem.createSpan({ cls: "status-bar-metrics" });
-    const estRead = Math.max(1, Math.ceil(this.currentWordCount / 200));
-    metricsEl.setText(`${this.currentWordCount}w · ${this.currentCharCount}c (~ ${estRead}m)`);
-    metricsEl.title = "Document word & character counts";
+    if (this.statusItemVisible("metrics")) {
+      const metricsEl = this.statusBarItem.createSpan({ cls: "status-bar-metrics" });
+      const estRead = Math.max(1, Math.ceil(this.currentWordCount / 200));
+      metricsEl.setText(`${this.currentWordCount}w · ${this.currentCharCount}c (~ ${estRead}m)`);
+      metricsEl.title = "Document word & character counts";
+    }
 
     // 2. Add Word Button Pill
-    const addBtn = this.statusBarItem.createSpan({ cls: "status-bar-pill status-bar-add-btn" });
-    addBtn.setText("➕ Add Word");
-    addBtn.title = "Click to add a new medical term or custom word to dictionaries";
-    addBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      new QuickAddWordModal(this.app, this).open();
-    });
+    if (this.statusItemVisible("addWord")) {
+      const addBtn = this.statusBarItem.createSpan({ cls: "status-bar-pill status-bar-add-btn" });
+      addBtn.setText("➕ Add Word");
+      addBtn.title = "Click to add a new medical term or custom word to dictionaries";
+      addBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        new QuickAddWordModal(this.app, this).open();
+      });
+    }
 
     // 3. Auto-Correct Toggle Pill
-    const autoCorrectPill = this.statusBarItem.createSpan({ cls: "status-bar-pill" });
-    const dot = autoCorrectPill.createSpan({ cls: "status-dot " + (enabled ? "active" : "inactive") });
-    autoCorrectPill.createSpan({ text: "Auto-Correct: " + (enabled ? "ON" : "OFF") });
-    autoCorrectPill.title = "Click to toggle real-time auto-correct ON / OFF";
-    autoCorrectPill.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      this.settings.autoCorrectEnabled = !this.settings.autoCorrectEnabled;
-      await this.saveSettings();
-      this.renderStatusBar();
-      new Notice("Auto-Correct is now " + (this.settings.autoCorrectEnabled ? "ON" : "OFF"));
-    });
+    if (this.statusItemVisible("autoCorrect")) {
+      const autoCorrectPill = this.statusBarItem.createSpan({ cls: "status-bar-pill" });
+      const dot = autoCorrectPill.createSpan({ cls: "status-dot " + (enabled ? "active" : "inactive") });
+      autoCorrectPill.createSpan({ text: "Auto-Correct: " + (enabled ? "ON" : "OFF") });
+      autoCorrectPill.title = "Click to toggle real-time auto-correct ON / OFF";
+      autoCorrectPill.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        this.settings.autoCorrectEnabled = !this.settings.autoCorrectEnabled;
+        await this.saveSettings();
+        this.renderStatusBar();
+        new Notice("Auto-Correct is now " + (this.settings.autoCorrectEnabled ? "ON" : "OFF"));
+      });
+    }
 
     // 4. Sensitivity Pill
-    const sensPill = this.statusBarItem.createSpan({ cls: "status-bar-pill pill-sens" });
-    sensPill.setText("⚡ " + sens);
-    sensPill.title = "Click to cycle sensitivity: Ultra → Proactive → Balanced → Strict → Minimal";
-    sensPill.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      const tiers = SENSITIVITY_TIERS;
-      const curIdx = tiers.indexOf(this.settings.autocorrectSensitivity);
-      const nextTier = tiers[(curIdx + 1) % tiers.length];
-      this.settings.autocorrectSensitivity = nextTier;
-      await this.saveSettings();
-      this.renderStatusBar();
-      new Notice("Sensitivity changed to: " + nextTier.toUpperCase());
-    });
+    if (this.statusItemVisible("sensitivity")) {
+      const sensPill = this.statusBarItem.createSpan({ cls: "status-bar-pill pill-sens" });
+      sensPill.setText("⚡ " + sens);
+      sensPill.title = "Click to cycle sensitivity: Ultra → Proactive → Balanced → Strict → Minimal";
+      sensPill.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const tiers = SENSITIVITY_TIERS;
+        const curIdx = tiers.indexOf(this.settings.autocorrectSensitivity);
+        const nextTier = tiers[(curIdx + 1) % tiers.length];
+        this.settings.autocorrectSensitivity = nextTier;
+        await this.saveSettings();
+        this.renderStatusBar();
+        new Notice("Sensitivity changed to: " + nextTier.toUpperCase());
+      });
+    }
 
     // 5. Sub-Dictionaries Pill
-    const dictPill = this.statusBarItem.createSpan({ cls: "status-bar-pill pill-dict" });
-    dictPill.setText("📚 " + subCount + " Sub-Dicts");
-    dictPill.title = "Click to open Dictionary & Wordlists Manager";
-    dictPill.addEventListener("click", (e) => {
-      e.stopPropagation();
-      new DictionaryManagerModal(this.app, this).open();
-    });
+    if (this.statusItemVisible("dictionaries")) {
+      const dictPill = this.statusBarItem.createSpan({ cls: "status-bar-pill pill-dict" });
+      dictPill.setText("📚 " + subCount + " Sub-Dicts");
+      dictPill.title = "Click to open Dictionary & Wordlists Manager";
+      dictPill.addEventListener("click", (e) => {
+        e.stopPropagation();
+        new DictionaryManagerModal(this.app, this).open();
+      });
+    }
 
     // 6. Fixes Counter Pill (if > 0)
-    if (fixCount > 0) {
+    if (fixCount > 0 && this.statusItemVisible("fixed")) {
       const fixedPill = this.statusBarItem.createSpan({ cls: "status-bar-pill pill-fixed" });
       fixedPill.setText("↺ " + fixCount + " fixed");
       fixedPill.title = "Click to revert last auto-correction";
@@ -1279,11 +1303,26 @@ class SilentAutocorrectPlugin extends Plugin {
       });
     }
 
+    // Hide the whole item (and its padding) when every indicator is switched off.
+    const anyVisible = STATUS_BAR_ITEMS.some((i) => i.key !== "fixed" ? this.statusItemVisible(i.key) : this.statusItemVisible("fixed") && fixCount > 0);
+    this.statusBarItem.toggleClass("sac-hidden", !anyVisible);
+
     // Right-click or general click on bar background opens Quick Menu
     this.statusBarItem.addEventListener("contextmenu", (evt) => {
       evt.preventDefault();
       this.showQuickMenu(evt);
     });
+  }
+
+  statusItemVisible(key) {
+    const items = this.settings && this.settings.statusBarItems;
+    return !items || items[key] !== false;
+  }
+
+  async setStatusItemVisible(key, visible) {
+    this.settings.statusBarItems = Object.assign({}, STATUS_BAR_DEFAULTS, this.settings.statusBarItems, { [key]: !!visible });
+    await this.saveSettings();
+    this.renderStatusBar();
   }
 
   showQuickMenu(evt) {
@@ -1346,6 +1385,16 @@ class SilentAutocorrectPlugin extends Plugin {
           if (mdView && mdView.editor) this.revertLastCorrection(mdView.editor);
         })
     );
+
+    menu.addSeparator();
+    for (const entry of STATUS_BAR_ITEMS) {
+      menu.addItem((item) =>
+        item
+          .setTitle("Show in status bar: " + entry.name)
+          .setChecked(this.statusItemVisible(entry.key))
+          .onClick(() => this.setStatusItemVisible(entry.key, !this.statusItemVisible(entry.key)))
+      );
+    }
 
     menu.showAtMouseEvent(evt);
   }
@@ -1706,6 +1755,7 @@ class SilentAutocorrectPlugin extends Plugin {
 
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    this.settings.statusBarItems = Object.assign({}, STATUS_BAR_DEFAULTS, this.settings.statusBarItems);
     if (!this.settings.customSubWords) {
       this.settings.customSubWords = {
         cardiology: [],
@@ -1976,6 +2026,10 @@ class FrequencyDownloadModal extends Modal {
     contentEl.createEl("p", {
       text: "Silent Autocorrect can use two English word-frequency files (about 6.5 MB) to tell real words from typos and to fix spacing slips such as \"inthe\". They are downloaded once from GitHub (raw.githubusercontent.com) and saved in this plugin's folder. Nothing you write is sent anywhere. You can also do this later from the plugin settings.",
     });
+    const feedback = contentEl.createEl("p");
+    feedback.appendText("Found a bug or have an idea for a new feature? Please report it on ");
+    feedback.createEl("a", { text: "GitHub issues", href: ISSUES_URL });
+    feedback.appendText(".");
     new Setting(contentEl)
       .addButton((btn) =>
         btn
@@ -2150,6 +2204,19 @@ class SilentAutocorrectSettingTab extends PluginSettingTab {
             this.display();
           })
       );
+
+    // Status bar indicators
+    new Setting(containerEl).setName("Status bar").setHeading();
+    for (const entry of STATUS_BAR_ITEMS) {
+      new Setting(containerEl)
+        .setName(entry.name)
+        .setDesc(entry.desc)
+        .addToggle((toggle) =>
+          toggle.setValue(this.plugin.statusItemVisible(entry.key)).onChange(async (val) => {
+            await this.plugin.setStatusItemVisible(entry.key, val);
+          })
+        );
+    }
 
     // Section 3: Clinical Shorthands
     new Setting(containerEl).setName("Clinical shorthands").setHeading();
